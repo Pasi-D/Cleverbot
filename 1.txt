@@ -1,0 +1,288 @@
+/*
+Robot project:
+Ariel Adamczyk ma101aa
+Steven Leighton ma001sl
+How to use H-Bridge - oomlaut website
+DTH temperature sensor usage - Adafruit
+range finder usage - Arduino forum
+bluetooth hc-06 usage - http://robotosh.blogspot.co.uk/ -> Arduino.cc
+*/
+//TEMPERATURE
+#include "DHT.h"
+#define DHTPIN 7
+#define DHTTYPE DHT11
+#define FAN 11
+//SERVO
+#include <Servo.h> //library
+//RANGE FINDER - ULTRASONIC
+#define trigPin 12
+#define echoPin 13
+long startTime = 0;
+long endTime = 0;
+Servo head; //servo with ultrasonic module
+long y = 10000; //FAN - JUST FOR PRESENTATION !
+//TEMPERATURE
+DHT dht(DHTPIN, DHTTYPE);
+boolean cool=false; //turn on/off FAN
+float t;
+//measurement takes approx 250ms !!!
+//Motor ONE
+int enable12 = 9; //input usage, PWM
+int in1 = 2; //in1 -> out1
+int in2 = 3; //in2 -> out2
+//Motor TWO
+int enable34 = 10; //input usage, PWM
+int in3 = 4; //in1 -> out1
+int in4 = 5; //in2 -> out2
+//BLUETOOTH
+/*
+A - auto
+M - manual
+L - turn left
+R - turn right
+B - go Back
+E - dead end -> turn 180
+F - forward
+S - stop
+*/
+char command;
+char mode = 'A';
+char input;
+void setup(){
+ //MOTOR ONE
+ pinMode(enable12, OUTPUT);
+ pinMode(in1, OUTPUT);
+ pinMode(in2, OUTPUT);
+ //MTOR TWO
+ pinMode(enable34, OUTPUT);
+ pinMode(in3, OUTPUT);
+ pinMode(in4, OUTPUT);
+ //TEMPERATURE DTH
+ dht.begin();
+ pinMode(FAN, OUTPUT);
+ //SERVO
+ head.attach(6);
+ head.write(90);
+ //RANGE FINDER
+ pinMode(trigPin, OUTPUT);
+ pinMode(echoPin, INPUT);
+//PREPARE MOTORS
+ setSpeedMotorOne(255); //255 - ON, 0 - OFF
+ setSpeedMotorTwo(255); //255 - ON, 0 - OFF
+ Serial.begin(9600);
+}//setup
+void loop(){
+ //BLUETOOTH
+ if(Serial.available()){
+ input = Serial.read();
+ if( input == 'M'){
+ mode = 'M';
+ command = 'S';
+ } else if ( input == 'A'){
+ mode = 'A';
+ } else if ( input == 'F'){
+ command = 'F';
+ } else if ( input == 'L'){
+ command = 'L';
+ } else if ( input == 'R'){
+ command = 'R';
+ } else if ( input == 'B'){
+ command = 'B';
+ } else if ( input == 'E'){
+ command = 'E';
+ } else if ( input == 'S'){
+ command = 'S';
+ }//if
+ }//if serial
+ if(mode == 'A'){ //if auto
+ //TEMPARATURE - DTH
+ checkFan();
+ //toggleFan(); //just for the presentation
+ //RANGE
+ int dist = 0;
+ startTime = millis();
+ if( startTime>endTime ){
+ dist = checkDistance();
+ endTime = startTime+500;
+ //Serial.print("Distance: ");
+ //Serial.println(dist);
+ }//if
+ int left = 0;
+ int right = 0;
+ 
+ //INTERACTION
+ if (dist > 1 && dist < 25 ){ //min-max range to avoid errors
+ stopMotors();
+ 
+ //CHECK SIDES
+ sweepUp(head,90,165);
+ left = checkDistance();
+ delay(500);
+ sweepDown(head,180,15);
+ right = checkDistance();
+ delay(500);
+ sweepUp(head,15,90);
+ delay(100);
+ 
+ //CHECK FAN
+ t = dht.readTemperature();
+ if( !(isnan(t)) ){
+ //Serial.print("Temp: ");
+ //Serial.println(t);
+ if(t>30){
+ cool=true;
+ } else if(t<30){
+ cool=false;
+ }//if
+ }//if
+ delay(50);
+ 
+ //TURN LEFT
+ if(left>right && left>40){
+ turnLeft();
+ //TURN RIGHT
+ } else if(right>left && right>40){
+ turnRight();
+ //GO BACK
+ } else if( (left>right && left<40) || (right>left && right<40) ){
+ goBack();
+ turnBack();
+ }//if turnings
+ }//if barrier ahead
+ 
+ motorOneForward(); //FORWARD
+ motorTwoForward(); //FORWARD
+ } else if(mode == 'M'){
+ 
+ if( command == 'F'){
+ motorOneForward(); //FORWARD
+ motorTwoForward(); //FORWARD
+ } else if ( command == 'L' ){
+ turnLeft();
+ command = 'S';
+ } else if ( command == 'R' ){
+ turnRight();
+ command = 'S';
+ } else if ( command == 'B' ){
+ goBack();
+ command = 'S';
+ } else if ( command == 'E' ){
+ turnBack();
+ command = 'S';
+ } else if ( command == 'S' ){
+ stopMotors();
+ }//if
+ 
+ }//if control
+}//loop
+//JUST FOR THE PRESENTATION !!!
+void toggleFan(){
+ long x = millis();
+ if(x>y){
+ cool=!cool;
+ y=x+10000;
+ }//if
+}//toggleFan
+void checkFan(){
+ if(cool){
+ digitalWrite(FAN,HIGH);
+ } else if(!cool){
+ digitalWrite(FAN,LOW);
+ }//if
+}//checkFan
+//RANGE FINDER CALCS
+ int checkDistance(){
+ int duration, distance;
+ digitalWrite(trigPin, HIGH);
+ delayMicroseconds(1000);
+ digitalWrite(trigPin, LOW);
+ duration = pulseIn(echoPin, HIGH);
+ distance = (duration/2) / 29.1;
+ return distance;
+ }//range
+//SERVO
+void sweepUp(Servo s, int start, int goal){
+ for(int y=start; y<goal; y++){
+ s.write(y);
+ delay(20);
+ }//for
+}//sweepUp
+void sweepDown(Servo s, int start, int goal){
+ for(int z=start; z>goal; z--){
+ s.write(z);
+ delay(20);
+ }//for
+}//sweepDown
+//MOTOR (approx. 1000/45o)
+void turnRight(){
+ long t = millis(); //current time
+ long d = t + 2000; //duration
+ while(t<d){
+ motorOneBackward();
+ motorTwoForward();
+ t = millis();
+ }//while
+}//turnRight
+void turnLeft(){
+ long t = millis(); //current time
+ long d = t + 2000; //duration
+ while(t<d){
+ motorOneForward();
+ motorTwoBackward();
+ t = millis();
+ }//while
+}//turn left
+void turnBack(){
+ long t = millis(); //current time
+ long d = t + 3000; //duration
+ while(t<d){
+ motorOneForward();
+ motorTwoBackward();
+ t = millis();
+ }//while
+}//turnBack
+void goBack(){
+ long t = millis(); //current time
+ long d = t + 3000; //duration
+ while(t<d){
+ motorOneBackward();
+ motorTwoBackward();
+ t = millis();
+ }//while
+}//goBack
+void stopMotors(){
+ brakeMotorOne(); //stop
+ brakeMotorTwo(); //stop
+}//stopMotors
+////// Motor One Routines ////////////
+void motorOneForward(){
+ digitalWrite(in1, LOW);
+ digitalWrite(in2, HIGH);
+}//forward
+void motorOneBackward(){
+ digitalWrite(in1, HIGH);
+ digitalWrite(in2, LOW);
+}//back
+void setSpeedMotorOne(int newSpeed){
+ analogWrite(enable12, newSpeed);
+}//set
+void brakeMotorOne(){
+ digitalWrite(in3, LOW);
+ digitalWrite(in4, LOW);
+}//brake
+////// Motor Two Routines ////////////
+void motorTwoForward(){
+ digitalWrite(in3, LOW);
+ digitalWrite(in4, HIGH);
+}//forward
+void motorTwoBackward(){
+ digitalWrite(in3, HIGH);
+ digitalWrite(in4, LOW);
+}//back
+void setSpeedMotorTwo(int newSpeed){
+ analogWrite(enable34, newSpeed);
+}//set
+void brakeMotorTwo(){
+ digitalWrite(in1, LOW);
+ digitalWrite(in2, LOW);
+}//brake
